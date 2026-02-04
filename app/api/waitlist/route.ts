@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { neon } from '@neondatabase/serverless';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -15,7 +15,6 @@ export async function POST(request: Request) {
       interestReason
     } = body;
 
-    // Validate required fields
     if (!email || !diagnosis || !primaryWearable) {
       return NextResponse.json(
         { error: 'Missing required fields' },
@@ -23,7 +22,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return NextResponse.json(
@@ -32,7 +30,23 @@ export async function POST(request: Request) {
       );
     }
 
-    // Insert into database
+    const sanitize = (str: string | null | undefined): string | null => {
+      if (!str) return null;
+      return str.slice(0, 500);
+    };
+
+    const databaseUrl = process.env.DATABASE_URL;
+    
+    if (!databaseUrl) {
+      console.error('DATABASE_URL environment variable is not set');
+      return NextResponse.json(
+        { error: 'Database configuration error' },
+        { status: 500 }
+      );
+    }
+
+    const sql = neon(databaseUrl);
+
     await sql`
       INSERT INTO waitlist (
         email,
@@ -44,13 +58,13 @@ export async function POST(request: Request) {
         interest_reason,
         created_at
       ) VALUES (
-        ${email},
-        ${diagnosis},
-        ${primaryWearable},
-        ${otherWearable || null},
-        ${trackingDuration || null},
-        ${openToContact || null},
-        ${interestReason || null},
+        ${email.toLowerCase().trim()},
+        ${sanitize(diagnosis)},
+        ${sanitize(primaryWearable)},
+        ${sanitize(otherWearable)},
+        ${sanitize(trackingDuration)},
+        ${sanitize(openToContact)},
+        ${sanitize(interestReason)},
         NOW()
       )
     `;
@@ -63,7 +77,6 @@ export async function POST(request: Request) {
   } catch (error: unknown) {
     console.error('Waitlist submission error:', error);
     
-    // Check for duplicate email error (PostgreSQL unique constraint violation)
     if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
       return NextResponse.json(
         { error: 'This email is already on the waitlist' },
